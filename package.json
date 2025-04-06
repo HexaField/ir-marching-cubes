@@ -1,0 +1,23 @@
+{
+  "name": "@hexafield/rpg-tools",
+  "version": "0.0.0",
+  "scripts": {
+    "test": "exit 0",
+    "check-errors": "tsc --noemit",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "format-scss": "stylelint \"**/*.scss\" --fix",
+    "format-staged": "lint-staged"
+  },
+  "license": "ISC",
+  "pre-commit": [
+    "format-staged"
+  ],
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "prettier --write \"**/*.{ts,tsx}\""
+    ],
+    "*.scss": [
+      "stylelint \"**/*.scss\" --fix"
+    ]
+  }
+}
