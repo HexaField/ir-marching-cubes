@@ -1,30 +1,22 @@
-import React, { useEffect } from 'react'
+import { useEffect } from 'react'
 
 import {
   createEntity,
+  Entity,
   EntityTreeComponent,
-  EntityUUID,
   getComponent,
   getOptionalComponent,
   removeComponent,
   removeEntity,
+  S,
   setComponent,
   UndefinedEntity,
-  useOptionalComponent,
   UUIDComponent
 } from '@ir-engine/ecs'
 import { GLTFComponent } from '@ir-engine/engine/src/gltf/GLTFComponent'
 import { SourceComponent } from '@ir-engine/engine/src/scene/components/SourceComponent'
-import {
-  defineAction,
-  defineState,
-  getMutableState,
-  matches,
-  none,
-  useHookstate,
-  useMutableState
-} from '@ir-engine/hyperflux'
-import { WorldNetworkAction } from '@ir-engine/network'
+import { definePrefab } from '@ir-engine/engine/src/scene/functions/definePrefab'
+import { useHookstate } from '@ir-engine/hyperflux'
 import { NameComponent } from '@ir-engine/spatial/src/common/NameComponent'
 import { ColliderComponent } from '@ir-engine/spatial/src/physics/components/ColliderComponent'
 import { RigidBodyComponent } from '@ir-engine/spatial/src/physics/components/RigidBodyComponent'
@@ -32,75 +24,20 @@ import { BodyTypes, Shapes } from '@ir-engine/spatial/src/physics/types/PhysicsT
 import { MeshComponent } from '@ir-engine/spatial/src/renderer/components/MeshComponent'
 import { VisibleComponent } from '@ir-engine/spatial/src/renderer/components/VisibleComponent'
 import { TransformComponent } from '@ir-engine/spatial/src/transform/components/TransformComponent'
-import { SpawnObjectActions } from '@ir-engine/spatial/src/transform/SpawnObjectActions'
 import { Box3, Vector3 } from 'three'
 
-export const ItemAction = {
-  spawn: defineAction(
-    SpawnObjectActions.spawnObject.extend({
-      type: 'hexafield.rpg-tools.ItemAction.spawn',
-      itemType: matches.string,
-      name: matches.string,
-      modelURL: matches.string
-    })
-  )
-}
-
-globalThis.ItemAction = ItemAction
-
-export interface ItemType {
-  type: string
-  name: string
-  modelURL: string
-}
-
-export const ItemState = defineState({
-  name: 'hexafield.rpg-tools.ItemState',
-
-  initial: {} as Record<EntityUUID, ItemType>,
-
-  receptors: {
-    onSpawn: ItemAction.spawn.receive((action) => {
-      getMutableState(ItemState)[action.entityUUID].set({
-        type: action.itemType,
-        name: action.name,
-        modelURL: action.modelURL
-      })
-    }),
-    onDestroyObject: WorldNetworkAction.destroyEntity.receive((action) => {
-      getMutableState(ItemState)[action.entityUUID].set(none)
-    })
-  },
-
-  reactor: () => {
-    const itemState = useMutableState(ItemState)
-    return (
-      <>
-        {itemState.keys.map((entityUUID: EntityUUID) => (
-          <AvatarReactor key={entityUUID} entityUUID={entityUUID} />
-        ))}
-      </>
-    )
-  }
-})
-
-const AvatarReactor = ({ entityUUID }: { entityUUID: EntityUUID }) => {
-  const { modelURL, name } = useHookstate(getMutableState(ItemState)[entityUUID]).value
-  const entity = UUIDComponent.useEntityByUUID(entityUUID)
+const ItemReactor = (props: { entity: Entity; prefab: { type: string; name: string; modelURL: string } }) => {
+  const { modelURL, name } = props.prefab
+  const entity = props.entity
 
   useEffect(() => {
-    if (!entity) return
     setComponent(entity, NameComponent, name)
     setComponent(entity, VisibleComponent, name)
-  }, [entity])
-
-  // wait for spawn system to create entity
-  const hasTransformComponent = useOptionalComponent(entity, TransformComponent)
+  }, [])
 
   const modelEntityState = useHookstate(UndefinedEntity)
 
   useEffect(() => {
-    if (!entity || !hasTransformComponent) return
     const modelEntity = createEntity()
     setComponent(entity, NameComponent, name)
     setComponent(modelEntity, UUIDComponent, UUIDComponent.generateUUID())
@@ -114,7 +51,7 @@ const AvatarReactor = ({ entityUUID }: { entityUUID: EntityUUID }) => {
       removeEntity(modelEntity)
       modelEntityState.set(UndefinedEntity)
     }
-  }, [entity, hasTransformComponent, modelURL])
+  }, [modelURL])
 
   const modelLoaded = GLTFComponent.useSceneLoaded(modelEntityState.value)
 
@@ -129,8 +66,7 @@ const AvatarReactor = ({ entityUUID }: { entityUUID: EntityUUID }) => {
       box.expandByObject(mesh)
     }
 
-    console.log(box)
-    setComponent(entity, RigidBodyComponent, { type: BodyTypes.Kinematic })
+    setComponent(entity, RigidBodyComponent, { type: BodyTypes.Dynamic })
 
     const colliderEntity = createEntity()
     setComponent(colliderEntity, UUIDComponent, UUIDComponent.generateUUID())
@@ -150,3 +86,14 @@ const AvatarReactor = ({ entityUUID }: { entityUUID: EntityUUID }) => {
 
   return null
 }
+
+export const ItemPrefabComponent = definePrefab({
+  name: 'ItemPrefab',
+  schema: S.Object({
+    type: S.String(),
+    name: S.String(),
+    modelURL: S.String()
+  }),
+  jsonID: 'RPG_item',
+  reactor: ItemReactor
+})
