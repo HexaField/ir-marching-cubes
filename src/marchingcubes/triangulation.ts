@@ -12,6 +12,7 @@ export interface Vector3 {
 
 export interface Triangle {
   vertices: [Vector3, Vector3, Vector3]
+  normals?: [Vector3, Vector3, Vector3]
 }
 
 export interface GridCell {
@@ -28,9 +29,61 @@ export interface GridData {
 export interface MarchingCubesBuffers {
   positions: BufferAttribute
   indices: BufferAttribute
+  normals?: BufferAttribute
   triangles?: Triangle[]
 }
 
+/**
+ * Calculate the gradient at a specific point in the grid
+ * This is used to determine the normal vector at that point
+ */
+function calculateGradient(grid: GridData, x: number, y: number, z: number): Vector3 {
+  const { values, cellSize } = grid
+  const sizeX = values.length
+  const sizeY = values[0].length
+  const sizeZ = values[0][0].length
+
+  // Calculate gradient using central differences
+  // For boundary points, use forward or backward differences
+  const gx =
+    x > 0 && x < sizeX - 1
+      ? (values[x + 1][y][z] - values[x - 1][y][z]) / (2 * cellSize.x)
+      : x === 0
+      ? (values[x + 1][y][z] - values[x][y][z]) / cellSize.x
+      : (values[x][y][z] - values[x - 1][y][z]) / cellSize.x
+
+  const gy =
+    y > 0 && y < sizeY - 1
+      ? (values[x][y + 1][z] - values[x][y - 1][z]) / (2 * cellSize.y)
+      : y === 0
+      ? (values[x][y + 1][z] - values[x][y][z]) / cellSize.y
+      : (values[x][y][z] - values[x][y - 1][z]) / cellSize.y
+
+  const gz =
+    z > 0 && z < sizeZ - 1
+      ? (values[x][y][z + 1] - values[x][y][z - 1]) / (2 * cellSize.z)
+      : z === 0
+      ? (values[x][y][z + 1] - values[x][y][z]) / cellSize.z
+      : (values[x][y][z] - values[x][y][z - 1]) / cellSize.z
+
+  // The gradient points in the direction of increasing values
+  // For an isosurface, we want the normal to point outward from lower values
+  // So we negate the gradient and normalize it
+  const length = Math.sqrt(gx * gx + gy * gy + gz * gz)
+  if (length < 0.00001) {
+    return { x: 0, y: 1, z: 0 } // Default normal if gradient is too small
+  }
+
+  return {
+    x: -gx / length,
+    y: -gy / length,
+    z: -gz / length
+  }
+}
+
+/**
+ * Interpolate between two points to find where the isosurface intersects an edge
+ */
 function vertexInterp(isolevel: number, p1: Vector3, p2: Vector3, valp1: number, valp2: number): Vector3 {
   const EPSILON = 0.00001
 
@@ -46,25 +99,33 @@ function vertexInterp(isolevel: number, p1: Vector3, p2: Vector3, valp1: number,
   }
 }
 
+/**
+ * Create buffer attributes from triangles
+ */
 function createBufferAttributes(triangles: Triangle[]): MarchingCubesBuffers {
   if (triangles.length === 0) {
     return {
       positions: new Float32BufferAttribute(new Float32Array(0), 3),
       indices: new BufferAttribute(new Uint16Array(0), 1),
+      normals: new Float32BufferAttribute(new Float32Array(0), 3),
       triangles: []
     }
   }
 
   const vertexMap = new Map<string, number>()
   const positions: number[] = []
+  const normals: number[] = []
   const indices: number[] = []
 
   for (const triangle of triangles) {
-    for (const vertex of triangle.vertices) {
+    for (let i = 0; i < 3; i++) {
+      const vertex = triangle.vertices[i]
+      const normal = triangle.normals ? triangle.normals[i] : { x: 0, y: 1, z: 0 }
       const key = `${vertex.x},${vertex.y},${vertex.z}`
 
       if (!vertexMap.has(key)) {
         positions.push(vertex.x, vertex.y, vertex.z)
+        normals.push(normal.x, normal.y, normal.z)
         vertexMap.set(key, vertexMap.size)
       }
 
@@ -73,6 +134,7 @@ function createBufferAttributes(triangles: Triangle[]): MarchingCubesBuffers {
   }
 
   const positionAttribute = new Float32BufferAttribute(new Float32Array(positions), 3)
+  const normalAttribute = new Float32BufferAttribute(new Float32Array(normals), 3)
   const indexAttribute = new BufferAttribute(
     indices.length > 65535 ? new Uint32Array(indices) : new Uint16Array(indices),
     1
@@ -81,10 +143,14 @@ function createBufferAttributes(triangles: Triangle[]): MarchingCubesBuffers {
   return {
     positions: positionAttribute,
     indices: indexAttribute,
+    normals: normalAttribute,
     triangles
   }
 }
 
+/**
+ * Main function to polygonize a grid using marching cubes
+ */
 export function polygoniseGrid(grid: GridData, isolevel: number): MarchingCubesBuffers {
   const { values, origin, cellSize } = grid
   const sizeX = values.length - 1
@@ -122,7 +188,19 @@ export function polygoniseGrid(grid: GridData, isolevel: number): MarchingCubesB
           ]
         }
 
-        const result = processCell(cell, isolevel)
+        // Calculate gradients for each corner of the cell
+        const gradients = [
+          calculateGradient(grid, x, y, z),
+          calculateGradient(grid, x + 1, y, z),
+          calculateGradient(grid, x + 1, y + 1, z),
+          calculateGradient(grid, x, y + 1, z),
+          calculateGradient(grid, x, y, z + 1),
+          calculateGradient(grid, x + 1, y, z + 1),
+          calculateGradient(grid, x + 1, y + 1, z + 1),
+          calculateGradient(grid, x, y + 1, z + 1)
+        ]
+
+        const result = processCell(cell, isolevel, gradients)
         if (result.triangles.length > 0) {
           allTriangles.push(...result.triangles)
         }
@@ -133,13 +211,17 @@ export function polygoniseGrid(grid: GridData, isolevel: number): MarchingCubesB
   return createBufferAttributes(allTriangles)
 }
 
-function processCell(grid: GridCell, isolevel: number): { triangles: Triangle[] } {
+/**
+ * Process a single cell to generate triangles for the isosurface
+ */
+function processCell(grid: GridCell, isolevel: number, gradients?: Vector3[]): { triangles: Triangle[] } {
   if (grid.points.length !== 8 || grid.values.length !== 8) {
     throw new Error('Grid cell must have exactly 8 points and 8 values')
   }
 
   const triangles: Triangle[] = []
   const vertList: Vector3[] = new Array(12)
+  const normList: Vector3[] | undefined = gradients ? new Array(12) : undefined
 
   let cubeIndex = 0
   if (grid.values[0] < isolevel) cubeIndex |= 1
@@ -155,45 +237,141 @@ function processCell(grid: GridCell, isolevel: number): { triangles: Triangle[] 
     return { triangles: [] }
   }
 
-  if (edgeTable[cubeIndex] & 1)
+  // Process each edge of the cube that intersects the isosurface
+  if (edgeTable[cubeIndex] & 1) {
     vertList[0] = vertexInterp(isolevel, grid.points[0], grid.points[1], grid.values[0], grid.values[1])
-  if (edgeTable[cubeIndex] & 2)
+    if (normList && gradients) {
+      // Interpolate the normal at this edge intersection
+      const mu = (isolevel - grid.values[0]) / (grid.values[1] - grid.values[0])
+      normList[0] = interpolateNormal(gradients[0], gradients[1], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 2) {
     vertList[1] = vertexInterp(isolevel, grid.points[1], grid.points[2], grid.values[1], grid.values[2])
-  if (edgeTable[cubeIndex] & 4)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[1]) / (grid.values[2] - grid.values[1])
+      normList[1] = interpolateNormal(gradients[1], gradients[2], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 4) {
     vertList[2] = vertexInterp(isolevel, grid.points[2], grid.points[3], grid.values[2], grid.values[3])
-  if (edgeTable[cubeIndex] & 8)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[2]) / (grid.values[3] - grid.values[2])
+      normList[2] = interpolateNormal(gradients[2], gradients[3], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 8) {
     vertList[3] = vertexInterp(isolevel, grid.points[3], grid.points[0], grid.values[3], grid.values[0])
-  if (edgeTable[cubeIndex] & 16)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[3]) / (grid.values[0] - grid.values[3])
+      normList[3] = interpolateNormal(gradients[3], gradients[0], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 16) {
     vertList[4] = vertexInterp(isolevel, grid.points[4], grid.points[5], grid.values[4], grid.values[5])
-  if (edgeTable[cubeIndex] & 32)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[4]) / (grid.values[5] - grid.values[4])
+      normList[4] = interpolateNormal(gradients[4], gradients[5], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 32) {
     vertList[5] = vertexInterp(isolevel, grid.points[5], grid.points[6], grid.values[5], grid.values[6])
-  if (edgeTable[cubeIndex] & 64)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[5]) / (grid.values[6] - grid.values[5])
+      normList[5] = interpolateNormal(gradients[5], gradients[6], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 64) {
     vertList[6] = vertexInterp(isolevel, grid.points[6], grid.points[7], grid.values[6], grid.values[7])
-  if (edgeTable[cubeIndex] & 128)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[6]) / (grid.values[7] - grid.values[6])
+      normList[6] = interpolateNormal(gradients[6], gradients[7], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 128) {
     vertList[7] = vertexInterp(isolevel, grid.points[7], grid.points[4], grid.values[7], grid.values[4])
-  if (edgeTable[cubeIndex] & 256)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[7]) / (grid.values[4] - grid.values[7])
+      normList[7] = interpolateNormal(gradients[7], gradients[4], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 256) {
     vertList[8] = vertexInterp(isolevel, grid.points[0], grid.points[4], grid.values[0], grid.values[4])
-  if (edgeTable[cubeIndex] & 512)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[0]) / (grid.values[4] - grid.values[0])
+      normList[8] = interpolateNormal(gradients[0], gradients[4], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 512) {
     vertList[9] = vertexInterp(isolevel, grid.points[1], grid.points[5], grid.values[1], grid.values[5])
-  if (edgeTable[cubeIndex] & 1024)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[1]) / (grid.values[5] - grid.values[1])
+      normList[9] = interpolateNormal(gradients[1], gradients[5], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 1024) {
     vertList[10] = vertexInterp(isolevel, grid.points[2], grid.points[6], grid.values[2], grid.values[6])
-  if (edgeTable[cubeIndex] & 2048)
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[2]) / (grid.values[6] - grid.values[2])
+      normList[10] = interpolateNormal(gradients[2], gradients[6], mu)
+    }
+  }
+  if (edgeTable[cubeIndex] & 2048) {
     vertList[11] = vertexInterp(isolevel, grid.points[3], grid.points[7], grid.values[3], grid.values[7])
+    if (normList && gradients) {
+      const mu = (isolevel - grid.values[3]) / (grid.values[7] - grid.values[3])
+      normList[11] = interpolateNormal(gradients[3], gradients[7], mu)
+    }
+  }
 
+  // Create triangles from the vertices
   const triIndices = triTable[cubeIndex]
   for (let i = 0; i < triIndices.length; i += 3) {
     if (triIndices[i] === -1) break
 
-    triangles.push({
+    const triangle: Triangle = {
       vertices: [vertList[triIndices[i]], vertList[triIndices[i + 1]], vertList[triIndices[i + 2]]] as [
         Vector3,
         Vector3,
         Vector3
       ]
-    })
+    }
+
+    // Add normals if available
+    if (normList) {
+      triangle.normals = [normList[triIndices[i]], normList[triIndices[i + 1]], normList[triIndices[i + 2]]] as [
+        Vector3,
+        Vector3,
+        Vector3
+      ]
+    }
+
+    triangles.push(triangle)
   }
 
   return { triangles }
+}
+
+/**
+ * Interpolate between two normals
+ */
+function interpolateNormal(n1: Vector3, n2: Vector3, mu: number): Vector3 {
+  // Linear interpolation of normals
+  const x = n1.x + mu * (n2.x - n1.x)
+  const y = n1.y + mu * (n2.y - n1.y)
+  const z = n1.z + mu * (n2.z - n1.z)
+
+  // Normalize the result
+  const length = Math.sqrt(x * x + y * y + z * z)
+  if (length < 0.00001) {
+    return { x: 0, y: 1, z: 0 } // Default normal if length is too small
+  }
+
+  return {
+    x: x / length,
+    y: y / length,
+    z: z / length
+  }
 }
 
 const edgeTable = [
