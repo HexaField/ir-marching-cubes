@@ -33,8 +33,10 @@ export interface ChunkGridResult {
  * Convert chunk data to GridData for marching cubes
  */
 function createGridData(chunkData: number[], chunkResolution: number, chunkSize: number): GridData {
-  const resolution = chunkResolution
-  const cellSize = chunkSize / (resolution - 1)
+  // We now have chunkResolution + 1 points in each dimension
+  const resolution = chunkResolution + 1
+  // The cell size remains the same - it's the distance between adjacent points
+  const cellSize = chunkSize / chunkResolution
 
   // Create a 3D array of values from the 1D array
   const values: number[][][] = Array(resolution)

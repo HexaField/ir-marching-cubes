@@ -37,10 +37,12 @@ const generateCube = (x: number, y: number, z: number, noise: Noise) => {
 const generateChunk = (x: number, y: number, z: number, noise: Noise) => {
   const chunk = [] as number[]
   const chunkSize = 16
+  // We need to include an extra cell in each direction for proper stitching
+  // This means we'll generate a grid of size (chunkSize+1) x (chunkSize+1) x (chunkSize+1)
 
-  for (let i = 0; i < chunkSize; i++) {
-    for (let j = 0; j < chunkSize; j++) {
-      for (let k = 0; k < chunkSize; k++) {
+  for (let i = 0; i <= chunkSize; i++) {
+    for (let j = 0; j <= chunkSize; j++) {
+      for (let k = 0; k <= chunkSize; k++) {
         // Calculate global coordinates
         const globalX = x * chunkSize + i
         const globalY = y * chunkSize + j
