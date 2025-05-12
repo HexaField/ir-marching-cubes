@@ -1,5 +1,6 @@
 import { BufferGeometry, Vector3 } from 'three'
 import { createGridGeometry } from '../marchingcubes/MarchingCubesMesh'
+import { createGridGeometryWithLODTransitions, determineTransitionDirections } from '../marchingcubes/TransvoxelMesh'
 import { GridData } from '../marchingcubes/triangulation'
 import { createNoise } from './generateChunks'
 
@@ -27,6 +28,8 @@ export interface ChunkGridResult {
   getOffset: (x: number, y: number, z: number, out: Vector3) => Vector3
   /** Generate a mesh for a specific chunk */
   generateGeometry: (x: number, y: number, z: number, simplificationFactor: number) => BufferGeometry | undefined
+  /** Generate a mesh with LOD transitions for a specific chunk */
+  getChunkData: (x: number, y: number, z: number) => GridData | undefined
 }
 
 /**
@@ -123,6 +126,7 @@ export function createChunkGrid(options: Partial<ChunkGridOptions> = {}): ChunkG
   return {
     chunkMap,
     getChunk: (x: number, y: number, z: number) => chunkMap.get(`${x},${y},${z}`),
+    getChunkData: (x: number, y: number, z: number) => chunkMap.get(`${x},${y},${z}`),
     getOffset: (x: number, y: number, z: number, out: Vector3) => {
       const [centerX, centerY, centerZ] = config.center || [0, 0, 0]
       const offsetX = centerX - (gridX * config.chunkSize) / 2
@@ -135,6 +139,30 @@ export function createChunkGrid(options: Partial<ChunkGridOptions> = {}): ChunkG
       const chunk = chunkMap.get(chunkKey)
       if (!chunk) return
 
+      // Calculate distance from center for LOD determination
+      const xzDistanceFromCenter = Math.sqrt(x * x + z * z)
+
+      // Determine if we need transition cells
+      const transitionDirections = determineTransitionDirections(
+        x,
+        y,
+        z,
+        xzDistanceFromCenter,
+        Math.floor(xzDistanceFromCenter / 2) * 2 // Transition at LOD boundaries
+      )
+
+      // If we need transition cells, use the Transvoxel algorithm
+      if (transitionDirections !== 0) {
+        return createGridGeometryWithLODTransitions(
+          chunk,
+          config.isolevel,
+          simplificationFactor,
+          transitionDirections,
+          0.5 // transitionScale
+        )
+      }
+
+      // Otherwise, use the standard marching cubes algorithm
       return createGridGeometry(chunk, config.isolevel, simplificationFactor)
     }
   }

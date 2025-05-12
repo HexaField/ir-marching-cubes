@@ -63,9 +63,22 @@ defineSystem({
         const xzDistanceFromCenter = Math.sqrt(x * x + z * z)
         // scale distance from range to powers of 2
         const simplificationFactor = Math.pow(2, Math.floor(xzDistanceFromCenter / 2))
-        console.log({ key, xzDistanceFromCenter, simplificationFactor })
+        // console.log({ key, xzDistanceFromCenter, simplificationFactor })
         const geometry = chunkGrid.generateGeometry(x, y, z, simplificationFactor)
-        setComponent(entity, MeshComponent, new Mesh(geometry, new MeshLambertMaterial({ color: 0x00ff00 })))
+        setComponent(
+          entity,
+          MeshComponent,
+          new Mesh(
+            geometry,
+            new MeshLambertMaterial({
+              // wireframe: true,
+              color:
+                // use the simplificationFactor to determine the color
+                // 0 = red, 1 = green, 2 = blue, 3 = yellow, 4 = orange, 5 = purple, 6 = cyan, 7 = magenta
+                colors[Math.log2(simplificationFactor) % colors.length]
+            })
+          )
+        )
         setComponent(entity, NameComponent, `Marching Cubes Chunk ${index}`)
         setComponent(entity, VisibleComponent)
 
@@ -83,3 +96,4 @@ defineSystem({
 })
 
 const _vec3 = new Vector3()
+const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xffa500, 0x800080, 0x00ffff, 0xff00ff]

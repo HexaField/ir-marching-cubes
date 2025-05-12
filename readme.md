@@ -5,6 +5,8 @@ This project implements marching cubes for iR Engine.
 ## References
 
 https://paulbourke.net/geometry/polygonise/
+https://ngildea.blogspot.com/2014/09/dual-contouring-chunked-terrain.html
+https://transvoxel.org//
 
 ## Basic Information
 
