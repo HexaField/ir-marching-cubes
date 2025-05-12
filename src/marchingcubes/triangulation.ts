@@ -4,60 +4,41 @@
  */
 import { BufferAttribute, Float32BufferAttribute } from 'three'
 
-// 3D Vector representation
 export interface Vector3 {
   x: number
   y: number
   z: number
 }
 
-// Triangle representation with 3 vertices
 export interface Triangle {
   vertices: [Vector3, Vector3, Vector3]
 }
 
-// Grid cell with 8 points and their scalar values
 export interface GridCell {
   points: Vector3[]
   values: number[]
 }
 
-// Entire grid data structure
 export interface GridData {
-  // 3D array of scalar values at each grid point
   values: number[][][]
-  // Origin position of the grid
   origin: Vector3
-  // Size of each cell in the grid
   cellSize: Vector3
 }
 
-// Return type for the polygonise function with Three.js buffer attributes
 export interface MarchingCubesBuffers {
   positions: BufferAttribute
   indices: BufferAttribute
-  triangles?: Triangle[] // Optional original triangles for reference
+  triangles?: Triangle[]
 }
 
-/**
- * Linearly interpolate the position where an isosurface cuts
- * an edge between two vertices, each with their own scalar value
- */
 function vertexInterp(isolevel: number, p1: Vector3, p2: Vector3, valp1: number, valp2: number): Vector3 {
   const EPSILON = 0.00001
 
-  if (Math.abs(isolevel - valp1) < EPSILON) {
-    return { ...p1 }
-  }
-  if (Math.abs(isolevel - valp2) < EPSILON) {
-    return { ...p2 }
-  }
-  if (Math.abs(valp1 - valp2) < EPSILON) {
-    return { ...p1 }
-  }
+  if (Math.abs(isolevel - valp1) < EPSILON) return { ...p1 }
+  if (Math.abs(isolevel - valp2) < EPSILON) return { ...p2 }
+  if (Math.abs(valp1 - valp2) < EPSILON) return { ...p1 }
 
   const mu = (isolevel - valp1) / (valp2 - valp1)
-
   return {
     x: p1.x + mu * (p2.x - p1.x),
     y: p1.y + mu * (p2.y - p1.y),
@@ -65,102 +46,7 @@ function vertexInterp(isolevel: number, p1: Vector3, p2: Vector3, valp1: number,
   }
 }
 
-/**
- * Given a grid cell and an isolevel, calculate the triangular
- * facets required to represent the isosurface through the cell.
- * Returns Three.js BufferAttributes for positions and indices.
- */
-export function polygonise(grid: GridCell, isolevel: number): MarchingCubesBuffers {
-  // Validate input
-  if (grid.points.length !== 8 || grid.values.length !== 8) {
-    throw new Error('Grid cell must have exactly 8 points and 8 values')
-  }
-
-  const triangles: Triangle[] = []
-  const vertList: Vector3[] = new Array(12)
-
-  // Determine the index into the edge table
-  let cubeIndex = 0
-  if (grid.values[0] < isolevel) cubeIndex |= 1
-  if (grid.values[1] < isolevel) cubeIndex |= 2
-  if (grid.values[2] < isolevel) cubeIndex |= 4
-  if (grid.values[3] < isolevel) cubeIndex |= 8
-  if (grid.values[4] < isolevel) cubeIndex |= 16
-  if (grid.values[5] < isolevel) cubeIndex |= 32
-  if (grid.values[6] < isolevel) cubeIndex |= 64
-  if (grid.values[7] < isolevel) cubeIndex |= 128
-
-  // Cube is entirely in/out of the surface
-  if (edgeTable[cubeIndex] === 0) {
-    // Return empty buffer attributes
-    return {
-      positions: new Float32BufferAttribute(new Float32Array(0), 3),
-      indices: new BufferAttribute(new Uint16Array(0), 1),
-      triangles: []
-    }
-  }
-
-  // Find the vertices where the surface intersects the cube
-  if (edgeTable[cubeIndex] & 1) {
-    vertList[0] = vertexInterp(isolevel, grid.points[0], grid.points[1], grid.values[0], grid.values[1])
-  }
-  if (edgeTable[cubeIndex] & 2) {
-    vertList[1] = vertexInterp(isolevel, grid.points[1], grid.points[2], grid.values[1], grid.values[2])
-  }
-  if (edgeTable[cubeIndex] & 4) {
-    vertList[2] = vertexInterp(isolevel, grid.points[2], grid.points[3], grid.values[2], grid.values[3])
-  }
-  if (edgeTable[cubeIndex] & 8) {
-    vertList[3] = vertexInterp(isolevel, grid.points[3], grid.points[0], grid.values[3], grid.values[0])
-  }
-  if (edgeTable[cubeIndex] & 16) {
-    vertList[4] = vertexInterp(isolevel, grid.points[4], grid.points[5], grid.values[4], grid.values[5])
-  }
-  if (edgeTable[cubeIndex] & 32) {
-    vertList[5] = vertexInterp(isolevel, grid.points[5], grid.points[6], grid.values[5], grid.values[6])
-  }
-  if (edgeTable[cubeIndex] & 64) {
-    vertList[6] = vertexInterp(isolevel, grid.points[6], grid.points[7], grid.values[6], grid.values[7])
-  }
-  if (edgeTable[cubeIndex] & 128) {
-    vertList[7] = vertexInterp(isolevel, grid.points[7], grid.points[4], grid.values[7], grid.values[4])
-  }
-  if (edgeTable[cubeIndex] & 256) {
-    vertList[8] = vertexInterp(isolevel, grid.points[0], grid.points[4], grid.values[0], grid.values[4])
-  }
-  if (edgeTable[cubeIndex] & 512) {
-    vertList[9] = vertexInterp(isolevel, grid.points[1], grid.points[5], grid.values[1], grid.values[5])
-  }
-  if (edgeTable[cubeIndex] & 1024) {
-    vertList[10] = vertexInterp(isolevel, grid.points[2], grid.points[6], grid.values[2], grid.values[6])
-  }
-  if (edgeTable[cubeIndex] & 2048) {
-    vertList[11] = vertexInterp(isolevel, grid.points[3], grid.points[7], grid.values[3], grid.values[7])
-  }
-
-  // Create the triangles
-  const triIndices = triTable[cubeIndex]
-  for (let i = 0; i < triIndices.length; i += 3) {
-    if (triIndices[i] === -1) break // End of valid triangles
-
-    triangles.push({
-      vertices: [vertList[triIndices[i]], vertList[triIndices[i + 1]], vertList[triIndices[i + 2]]] as [
-        Vector3,
-        Vector3,
-        Vector3
-      ]
-    })
-  }
-
-  // Convert triangles to Three.js buffer attributes
-  return createBufferAttributes(triangles)
-}
-
-/**
- * Convert an array of triangles to Three.js BufferAttributes
- */
 function createBufferAttributes(triangles: Triangle[]): MarchingCubesBuffers {
-  // If no triangles, return empty buffer attributes
   if (triangles.length === 0) {
     return {
       positions: new Float32BufferAttribute(new Float32Array(0), 3),
@@ -169,31 +55,23 @@ function createBufferAttributes(triangles: Triangle[]): MarchingCubesBuffers {
     }
   }
 
-  // Create a map to deduplicate vertices
   const vertexMap = new Map<string, number>()
   const positions: number[] = []
   const indices: number[] = []
 
-  // Process each triangle
   for (const triangle of triangles) {
     for (const vertex of triangle.vertices) {
-      // Create a unique key for this vertex
       const key = `${vertex.x},${vertex.y},${vertex.z}`
 
-      // Check if we've already stored this vertex
       if (!vertexMap.has(key)) {
-        // Add the vertex to our positions array
         positions.push(vertex.x, vertex.y, vertex.z)
-        // Store the index
         vertexMap.set(key, vertexMap.size)
       }
 
-      // Add the vertex index to our indices array
       indices.push(vertexMap.get(key)!)
     }
   }
 
-  // Create the buffer attributes
   const positionAttribute = new Float32BufferAttribute(new Float32Array(positions), 3)
   const indexAttribute = new BufferAttribute(
     indices.length > 65535 ? new Uint32Array(indices) : new Uint16Array(indices),
@@ -207,112 +85,55 @@ function createBufferAttributes(triangles: Triangle[]): MarchingCubesBuffers {
   }
 }
 
-/**
- * Process an entire grid of cells at once and generate a single set of buffer attributes
- * for the entire grid. This is more efficient than processing each cell individually.
- *
- * @param grid The grid data containing scalar values and grid information
- * @param isolevel The isolevel value that determines the surface
- * @returns Three.js buffer attributes for the entire grid
- */
 export function polygoniseGrid(grid: GridData, isolevel: number): MarchingCubesBuffers {
   const { values, origin, cellSize } = grid
-
-  // Get grid dimensions
   const sizeX = values.length - 1
   const sizeY = values[0].length - 1
   const sizeZ = values[0][0].length - 1
-
-  // Collect all triangles from the grid
   const allTriangles: Triangle[] = []
 
-  // Process each cell in the grid
   for (let x = 0; x < sizeX; x++) {
     for (let y = 0; y < sizeY; y++) {
       for (let z = 0; z < sizeZ; z++) {
-        // Create a grid cell for this position
         const cell: GridCell = {
           points: [
-            // Vertex 0: (x, y, z)
-            {
-              x: origin.x + x * cellSize.x,
-              y: origin.y + y * cellSize.y,
-              z: origin.z + z * cellSize.z
-            },
-            // Vertex 1: (x+1, y, z)
-            {
-              x: origin.x + (x + 1) * cellSize.x,
-              y: origin.y + y * cellSize.y,
-              z: origin.z + z * cellSize.z
-            },
-            // Vertex 2: (x+1, y+1, z)
-            {
-              x: origin.x + (x + 1) * cellSize.x,
-              y: origin.y + (y + 1) * cellSize.y,
-              z: origin.z + z * cellSize.z
-            },
-            // Vertex 3: (x, y+1, z)
-            {
-              x: origin.x + x * cellSize.x,
-              y: origin.y + (y + 1) * cellSize.y,
-              z: origin.z + z * cellSize.z
-            },
-            // Vertex 4: (x, y, z+1)
-            {
-              x: origin.x + x * cellSize.x,
-              y: origin.y + y * cellSize.y,
-              z: origin.z + (z + 1) * cellSize.z
-            },
-            // Vertex 5: (x+1, y, z+1)
-            {
-              x: origin.x + (x + 1) * cellSize.x,
-              y: origin.y + y * cellSize.y,
-              z: origin.z + (z + 1) * cellSize.z
-            },
-            // Vertex 6: (x+1, y+1, z+1)
+            { x: origin.x + x * cellSize.x, y: origin.y + y * cellSize.y, z: origin.z + z * cellSize.z },
+            { x: origin.x + (x + 1) * cellSize.x, y: origin.y + y * cellSize.y, z: origin.z + z * cellSize.z },
+            { x: origin.x + (x + 1) * cellSize.x, y: origin.y + (y + 1) * cellSize.y, z: origin.z + z * cellSize.z },
+            { x: origin.x + x * cellSize.x, y: origin.y + (y + 1) * cellSize.y, z: origin.z + z * cellSize.z },
+            { x: origin.x + x * cellSize.x, y: origin.y + y * cellSize.y, z: origin.z + (z + 1) * cellSize.z },
+            { x: origin.x + (x + 1) * cellSize.x, y: origin.y + y * cellSize.y, z: origin.z + (z + 1) * cellSize.z },
             {
               x: origin.x + (x + 1) * cellSize.x,
               y: origin.y + (y + 1) * cellSize.y,
               z: origin.z + (z + 1) * cellSize.z
             },
-            // Vertex 7: (x, y+1, z+1)
-            {
-              x: origin.x + x * cellSize.x,
-              y: origin.y + (y + 1) * cellSize.y,
-              z: origin.z + (z + 1) * cellSize.z
-            }
+            { x: origin.x + x * cellSize.x, y: origin.y + (y + 1) * cellSize.y, z: origin.z + (z + 1) * cellSize.z }
           ],
           values: [
-            values[x][y][z], // Vertex 0
-            values[x + 1][y][z], // Vertex 1
-            values[x + 1][y + 1][z], // Vertex 2
-            values[x][y + 1][z], // Vertex 3
-            values[x][y][z + 1], // Vertex 4
-            values[x + 1][y][z + 1], // Vertex 5
-            values[x + 1][y + 1][z + 1], // Vertex 6
-            values[x][y + 1][z + 1] // Vertex 7
+            values[x][y][z],
+            values[x + 1][y][z],
+            values[x + 1][y + 1][z],
+            values[x][y + 1][z],
+            values[x][y][z + 1],
+            values[x + 1][y][z + 1],
+            values[x + 1][y + 1][z + 1],
+            values[x][y + 1][z + 1]
           ]
         }
 
-        // Process this cell
         const result = processCell(cell, isolevel)
-        if (result.triangles && result.triangles.length > 0) {
+        if (result.triangles.length > 0) {
           allTriangles.push(...result.triangles)
         }
       }
     }
   }
 
-  // Create buffer attributes from all triangles
   return createBufferAttributes(allTriangles)
 }
 
-/**
- * Process a single cell and return the triangles without creating buffer attributes.
- * This is used internally by polygoniseGrid to avoid creating buffer attributes for each cell.
- */
 function processCell(grid: GridCell, isolevel: number): { triangles: Triangle[] } {
-  // Validate input
   if (grid.points.length !== 8 || grid.values.length !== 8) {
     throw new Error('Grid cell must have exactly 8 points and 8 values')
   }
@@ -320,7 +141,6 @@ function processCell(grid: GridCell, isolevel: number): { triangles: Triangle[] 
   const triangles: Triangle[] = []
   const vertList: Vector3[] = new Array(12)
 
-  // Determine the index into the edge table
   let cubeIndex = 0
   if (grid.values[0] < isolevel) cubeIndex |= 1
   if (grid.values[1] < isolevel) cubeIndex |= 2
@@ -331,53 +151,38 @@ function processCell(grid: GridCell, isolevel: number): { triangles: Triangle[] 
   if (grid.values[6] < isolevel) cubeIndex |= 64
   if (grid.values[7] < isolevel) cubeIndex |= 128
 
-  // Cube is entirely in/out of the surface
   if (edgeTable[cubeIndex] === 0) {
     return { triangles: [] }
   }
 
-  // Find the vertices where the surface intersects the cube
-  if (edgeTable[cubeIndex] & 1) {
+  if (edgeTable[cubeIndex] & 1)
     vertList[0] = vertexInterp(isolevel, grid.points[0], grid.points[1], grid.values[0], grid.values[1])
-  }
-  if (edgeTable[cubeIndex] & 2) {
+  if (edgeTable[cubeIndex] & 2)
     vertList[1] = vertexInterp(isolevel, grid.points[1], grid.points[2], grid.values[1], grid.values[2])
-  }
-  if (edgeTable[cubeIndex] & 4) {
+  if (edgeTable[cubeIndex] & 4)
     vertList[2] = vertexInterp(isolevel, grid.points[2], grid.points[3], grid.values[2], grid.values[3])
-  }
-  if (edgeTable[cubeIndex] & 8) {
+  if (edgeTable[cubeIndex] & 8)
     vertList[3] = vertexInterp(isolevel, grid.points[3], grid.points[0], grid.values[3], grid.values[0])
-  }
-  if (edgeTable[cubeIndex] & 16) {
+  if (edgeTable[cubeIndex] & 16)
     vertList[4] = vertexInterp(isolevel, grid.points[4], grid.points[5], grid.values[4], grid.values[5])
-  }
-  if (edgeTable[cubeIndex] & 32) {
+  if (edgeTable[cubeIndex] & 32)
     vertList[5] = vertexInterp(isolevel, grid.points[5], grid.points[6], grid.values[5], grid.values[6])
-  }
-  if (edgeTable[cubeIndex] & 64) {
+  if (edgeTable[cubeIndex] & 64)
     vertList[6] = vertexInterp(isolevel, grid.points[6], grid.points[7], grid.values[6], grid.values[7])
-  }
-  if (edgeTable[cubeIndex] & 128) {
+  if (edgeTable[cubeIndex] & 128)
     vertList[7] = vertexInterp(isolevel, grid.points[7], grid.points[4], grid.values[7], grid.values[4])
-  }
-  if (edgeTable[cubeIndex] & 256) {
+  if (edgeTable[cubeIndex] & 256)
     vertList[8] = vertexInterp(isolevel, grid.points[0], grid.points[4], grid.values[0], grid.values[4])
-  }
-  if (edgeTable[cubeIndex] & 512) {
+  if (edgeTable[cubeIndex] & 512)
     vertList[9] = vertexInterp(isolevel, grid.points[1], grid.points[5], grid.values[1], grid.values[5])
-  }
-  if (edgeTable[cubeIndex] & 1024) {
+  if (edgeTable[cubeIndex] & 1024)
     vertList[10] = vertexInterp(isolevel, grid.points[2], grid.points[6], grid.values[2], grid.values[6])
-  }
-  if (edgeTable[cubeIndex] & 2048) {
+  if (edgeTable[cubeIndex] & 2048)
     vertList[11] = vertexInterp(isolevel, grid.points[3], grid.points[7], grid.values[3], grid.values[7])
-  }
 
-  // Create the triangles
   const triIndices = triTable[cubeIndex]
   for (let i = 0; i < triIndices.length; i += 3) {
-    if (triIndices[i] === -1) break // End of valid triangles
+    if (triIndices[i] === -1) break
 
     triangles.push({
       vertices: [vertList[triIndices[i]], vertList[triIndices[i + 1]], vertList[triIndices[i + 2]]] as [
