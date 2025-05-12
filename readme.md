@@ -37,7 +37,6 @@ https://paulbourke.net/geometry/polygonise/
 ## Progress
 
 - [x] Marching cubes triangulation function
-- [ ] Create MarchingCubeWorld ECS component that takes a set of parameters to generate chunks
-- [ ] Chunks hold a dataset, triangulates it and creates a mesh
+- [x] Create noise based chunk generation
+- [x] LOD simplification generation
 - [ ] Add texture data support
-- [ ] Higher level LOD triangulation generation
